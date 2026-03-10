@@ -1,159 +1,144 @@
-<p align="center">
-  <img alt="LeRobot, Hugging Face Robotics Library" src="./media/readme/lerobot-logo-thumbnail.png" width="100%">
-</p>
+# LeRobot x Isaac Sim/Isaac Lab 交接文档（可直接运行）
 
-<div align="center">
+## 1. 目标与当前状态
 
-[![Tests](https://github.com/huggingface/lerobot/actions/workflows/nightly.yml/badge.svg?branch=main)](https://github.com/huggingface/lerobot/actions/workflows/nightly.yml?query=branch%3Amain)
-[![Python versions](https://img.shields.io/pypi/pyversions/lerobot)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/huggingface/lerobot/blob/main/LICENSE)
-[![Status](https://img.shields.io/pypi/status/lerobot)](https://pypi.org/project/lerobot/)
-[![Version](https://img.shields.io/pypi/v/lerobot)](https://pypi.org/project/lerobot/)
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.1-ff69b4.svg)](https://github.com/huggingface/lerobot/blob/main/CODE_OF_CONDUCT.md)
-[![Discord](https://img.shields.io/badge/Discord-Join_Us-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/q8Dzzpym3f)
+目标：保持两个独立环境，不跨 conda import，仅通过本地 HTTP 通信。
 
-</div>
+- `env_lerobot`：策略服务、模型推理（PI0/VLA）
+- `env_isaaclab` / 系统 ROS：仿真与 ROS topic 输入输出
 
-**LeRobot** aims to provide models, datasets, and tools for real-world robotics in PyTorch. The goal is to lower the barrier to entry so that everyone can contribute to and benefit from shared datasets and pretrained models.
+当前链路：
 
-🤗 A hardware-agnostic, Python-native interface that standardizes control across diverse platforms, from low-cost arms (SO-100) to humanoids.
+`/joint_states + 3路图像 -> HTTP /act -> /policy_action -> /joint_command`
 
-🤗 A standardized, scalable LeRobotDataset format (Parquet + MP4 or images) hosted on the Hugging Face Hub, enabling efficient storage, streaming and visualization of massive robotic datasets.
+## 2. 关键文件（本次交接必须保留）
 
-🤗 State-of-the-art policies that have been shown to transfer to the real-world ready for training and deployment.
+- `shared/schema.py`
+- `shared/http_client.py`
+- `lerobot_side/server.py`
+- `isaaclab_side/ros2_obs_action_bridge.py`
+- `isaaclab_side/ros2_action_to_joint_command.py`
+- `isaaclab_side/run_env_loop.py`
+- `IsaacLab_env.sh`
+- `lerobot_env.sh`
+- `README_HANDOVER_HTTP_BRIDGE_CN.md`（本文件）
 
-🤗 Comprehensive support for the open-source ecosystem to democratize physical AI.
+## 3. 三终端标准启动命令
 
-## Quick Start
-
-LeRobot can be installed directly from PyPI.
-
-```bash
-pip install lerobot
-lerobot-info
-```
-
-> [!IMPORTANT]
-> For detailed installation guide, please see the [Installation Documentation](https://huggingface.co/docs/lerobot/installation).
-
-## Robots & Control
-
-<div align="center">
-  <img src="./media/readme/robots_control_video.webp" width="640px" alt="Reachy 2 Demo">
-</div>
-
-LeRobot provides a unified `Robot` class interface that decouples control logic from hardware specifics. It supports a wide range of robots and teleoperation devices.
-
-```python
-from lerobot.robots.myrobot import MyRobot
-
-# Connect to a robot
-robot = MyRobot(config=...)
-robot.connect()
-
-# Read observation and send action
-obs = robot.get_observation()
-action = model.select_action(obs)
-robot.send_action(action)
-```
-
-**Supported Hardware:** SO100, LeKiwi, Koch, HopeJR, OMX, EarthRover, Reachy2, Gamepads, Keyboards, Phones, OpenARM, Unitree G1.
-
-While these devices are natively integrated into the LeRobot codebase, the library is designed to be extensible. You can easily implement the Robot interface to utilize LeRobot's data collection, training, and visualization tools for your own custom robot.
-
-For detailed hardware setup guides, see the [Hardware Documentation](https://huggingface.co/docs/lerobot/integrate_hardware).
-
-## LeRobot Dataset
-
-To solve the data fragmentation problem in robotics, we utilize the **LeRobotDataset** format.
-
-- **Structure:** Synchronized MP4 videos (or images) for vision and Parquet files for state/action data.
-- **HF Hub Integration:** Explore thousands of robotics datasets on the [Hugging Face Hub](https://huggingface.co/lerobot).
-- **Tools:** Seamlessly delete episodes, split by indices/fractions, add/remove features, and merge multiple datasets.
-
-```python
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-
-# Load a dataset from the Hub
-dataset = LeRobotDataset("lerobot/aloha_mobile_cabinet")
-
-# Access data (automatically handles video decoding)
-episode_index=0
-print(f"{dataset[episode_index]['action'].shape=}\n")
-```
-
-Learn more about it in the [LeRobotDataset Documentation](https://huggingface.co/docs/lerobot/lerobot-dataset-v3)
-
-## SoTA Models
-
-LeRobot implements state-of-the-art policies in pure PyTorch, covering Imitation Learning, Reinforcement Learning, and Vision-Language-Action (VLA) models, with more coming soon. It also provides you with the tools to instrument and inspect your training process.
-
-<p align="center">
-  <img alt="Gr00t Architecture" src="./media/readme/VLA_architecture.jpg" width="640px">
-</p>
-
-Training a policy is as simple as running a script configuration:
+## 终端 A：LeRobot 服务（PI0）
 
 ```bash
-lerobot-train \
-  --policy=act \
-  --dataset.repo_id=lerobot/aloha_mobile_cabinet
+cd /root/gpufree-data/lerobot
+LEROBOT_POLICY_BACKEND=lerobot \
+LEROBOT_MODEL_PATH=/root/gpufree-data/models/pi0_base \
+LEROBOT_MODEL_DEVICE=cuda \
+LEROBOT_STRICT_MODEL_LOAD=false \
+./lerobot_env.sh -- python -m lerobot_side.server
 ```
 
-| Category                   | Models                                                                                                                                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Imitation Learning**     | [ACT](./docs/source/policy_act_README.md), [Diffusion](./docs/source/policy_diffusion_README.md), [VQ-BeT](./docs/source/policy_vqbet_README.md)                                                             |
-| **Reinforcement Learning** | [HIL-SERL](./docs/source/hilserl.mdx), [TDMPC](./docs/source/policy_tdmpc_README.md) & QC-FQL (coming soon)                                                                                                  |
-| **VLAs Models**            | [Pi0Fast](./docs/source/pi0fast.mdx), [Pi0.5](./docs/source/pi05.mdx), [GR00T N1.5](./docs/source/policy_groot_README.md), [SmolVLA](./docs/source/policy_smolvla_README.md), [XVLA](./docs/source/xvla.mdx) |
-
-Similarly to the hardware, you can easily implement your own policy & leverage LeRobot's data collection, training, and visualization tools, and share your model to the HF Hub
-
-For detailed policy setup guides, see the [Policy Documentation](https://huggingface.co/docs/lerobot/bring_your_own_policies).
-
-## Inference & Evaluation
-
-Evaluate your policies in simulation or on real hardware using the unified evaluation script. LeRobot supports standard benchmarks like **LIBERO**, **MetaWorld** and more to come.
+健康检查：
 
 ```bash
-# Evaluate a policy on the LIBERO benchmark
-lerobot-eval \
-  --policy.path=lerobot/pi0_libero_finetuned \
-  --env.type=libero \
-  --env.task=libero_object \
-  --eval.n_episodes=10
+curl -s http://127.0.0.1:8000/health
 ```
 
-Learn how to implement your own simulation environment or benchmark and distribute it from the HF Hub by following the [EnvHub Documentation](https://huggingface.co/docs/lerobot/envhub)
+## 终端 B：ROS 观测桥（joint+3路图像 -> /act -> /policy_action）
 
-## Resources
+```bash
+conda deactivate 2>/dev/null || true
+unset PYTHONPATH
+unset LD_LIBRARY_PATH
+source /opt/ros/humble/setup.bash
 
-- **[Documentation](https://huggingface.co/docs/lerobot/index):** The complete guide to tutorials & API.
-- **[Chinese Tutorials: LeRobot+SO-ARM101中文教程-同济子豪兄](https://zihao-ai.feishu.cn/wiki/space/7589642043471924447)** Detailed doc for assembling, teleoperate, dataset, train, deploy. Verified by Seed Studio and 5 global hackathon players.
-- **[Discord](https://discord.gg/q8Dzzpym3f):** Join the `LeRobot` server to discuss with the community.
-- **[X](https://x.com/LeRobotHF):** Follow us on X to stay up-to-date with the latest developments.
-- **[Robot Learning Tutorial](https://huggingface.co/spaces/lerobot/robot-learning-tutorial):** A free, hands-on course to learn robot learning using LeRobot.
-
-## Citation
-
-If you use LeRobot in your research, please cite:
-
-```bibtex
-@misc{cadene2024lerobot,
-    author = {Cadene, Remi and Alibert, Simon and Soare, Alexander and Gallouedec, Quentin and Zouitine, Adil and Palma, Steven and Kooijmans, Pepijn and Aractingi, Michel and Shukor, Mustafa and Aubakirova, Dana and Russi, Martino and Capuano, Francesco and Pascal, Caroline and Choghari, Jade and Moss, Jess and Wolf, Thomas},
-    title = {LeRobot: State-of-the-art Machine Learning for Real-World Robotics in Pytorch},
-    howpublished = "\url{https://github.com/huggingface/lerobot}",
-    year = {2024}
-}
+cd /root/gpufree-data/lerobot
+/usr/bin/python3 -m isaaclab_side.ros2_obs_action_bridge \
+  --server-url http://127.0.0.1:8000 \
+  --joint-topic /joint_states \
+  --image-topic /sim/camera/image_raw \
+  --image-topic-left /sim/camera/image_raw_left \
+  --image-topic-right /sim/camera/image_raw_right \
+  --action-topic /policy_action \
+  --include-image \
+  --include-multi-image \
+  --instruction "pick the yellow block" \
+  --rate-hz 3
 ```
 
-## Contribute
+预期日志（每 10 次）：
 
-We welcome contributions from everyone in the community! To get started, please read our [CONTRIBUTING.md](./CONTRIBUTING.md) guide. Whether you're adding a new feature, improving documentation, or fixing a bug, your help and feedback are invaluable. We're incredibly excited about the future of open-source robotics and can't wait to work with you on what's next—thank you for your support!
+- `image_keys=['base_0_rgb', 'left_wrist_0_rgb', 'right_wrist_0_rgb']`
 
-<p align="center">
-  <img alt="SO101 Video" src="./media/readme/so100_video.webp" width="640px">
-</p>
+## 终端 C：动作桥（/policy_action -> /joint_command）
 
-<div align="center">
-<sub>Built by the <a href="https://huggingface.co/lerobot">LeRobot</a> team at <a href="https://huggingface.co">Hugging Face</a> with ❤️</sub>
-</div>
+```bash
+conda deactivate 2>/dev/null || true
+unset PYTHONPATH
+unset LD_LIBRARY_PATH
+source /opt/ros/humble/setup.bash
+
+cd /root/gpufree-data/lerobot
+/usr/bin/python3 -m isaaclab_side.ros2_action_to_joint_command \
+  --state-topic /joint_states \
+  --action-topic /policy_action \
+  --cmd-topic /joint_command \
+  --mode absolute \
+  --action-scale 1.0
+```
+
+## 4. 验证标准（是否真在 PI0 推理）
+
+执行：
+
+```bash
+curl -s http://127.0.0.1:8000/health
+ros2 topic echo /policy_action --once
+ros2 topic echo /joint_command --once
+```
+
+判定“已进入真实 PI0 路径”：
+
+- `model_loaded = 1`
+- `last_action_source = "pi0_select_action"`
+- `inference_ok_count > 0` 且持续增长
+- `fallback_count` 不持续增长
+
+若出现 `All image features are missing`：
+
+- 先确认终端 B 是否带了 `--include-image --include-multi-image`
+- 先停掉旧进程再重启三终端，避免旧参数残留
+- 确认 topic 名称是：
+  - `/sim/camera/image_raw`
+  - `/sim/camera/image_raw_left`
+  - `/sim/camera/image_raw_right`
+
+## 5. 摄像头排布建议（避免“手臂乱窜”）
+
+- `base_0_rgb`：固定在底座前上方，能同时看见夹爪工作区和目标物。
+- `left_wrist_0_rgb`：夹爪左侧后方，朝夹爪前方略向下（确保目标在画面中央偏下）。
+- `right_wrist_0_rgb`：与左腕对称。
+
+原则：
+
+- 可以拍到少量机械臂本体，但不要被大面积遮挡。
+- 目标物必须在两个腕部视角中长期可见；动起来也不能丢。
+- 三路相机方向不应完全重合，避免信息冗余。
+
+## 6. 常见问题
+
+- ROS + conda + Isaac 混用导致 `rclpy`/`numpy`/`GLIBCXX` 冲突：
+  - ROS bridge 固定用系统 Python（`/usr/bin/python3`）。
+- Isaac 端直接 `gym.make("Isaac-...")` 报未注册：
+  - 用 `./isaaclab.sh -p ...` 运行环境脚本。
+- GPU OOM：
+  - 降低并行/频率，关闭其他占显存进程。
+
+## 7. 本地已清理的无用文件
+
+本次已删除：
+
+- `lerobot_isaaclab_bridge_bundle.tar.gz`
+- `isaaclab_side/__pycache__/`
+- `lerobot_side/__pycache__/`
+- `shared/__pycache__/`
+- `src/lerobot/__pycache__/`
+
