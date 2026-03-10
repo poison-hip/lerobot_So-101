@@ -1,0 +1,5 @@
+# Bridge server side (env_lerobot)
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=1.10
+

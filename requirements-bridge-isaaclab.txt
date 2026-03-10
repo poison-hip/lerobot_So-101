@@ -1,0 +1,5 @@
+# Bridge client side (env_isaaclab)
+requests>=2.31
+pydantic>=1.10
+numpy>=1.24
+# rclpy / sensor_msgs / cv_bridge are provided by ROS2 installation.
