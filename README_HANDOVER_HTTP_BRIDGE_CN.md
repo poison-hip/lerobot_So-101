@@ -42,7 +42,7 @@ LEROBOT_STRICT_MODEL_LOAD=false \
 curl -s http://127.0.0.1:8000/health
 ```
 
-## 终端 B：ROS 观测桥（joint+3路图像 -> /act -> /policy_action）
+## 终端 B：ROS 观测桥（joint+3路图像 -> /act -> /policy_action，严格三路）
 
 ```bash
 conda deactivate 2>/dev/null || true
@@ -60,15 +60,21 @@ cd /root/gpufree-data/lerobot
   --action-topic /policy_action \
   --include-image \
   --include-multi-image \
-  --instruction "pick the yellow block" \
-  --rate-hz 3
+  --require-all-multi-images \
+  --image-stale-ms 1200 \
+  --multi-image-sync-ms 250 \
+  --reuse-missing-image-ms 200 \
+  --safe-zero-on-missing-images \
+  --safe-zero-after-ms 500 \
+  --instruction "pick the red block" \
+  --rate-hz 4
 ```
 
 预期日志（每 10 次）：
 
 - `image_keys=['base_0_rgb', 'left_wrist_0_rgb', 'right_wrist_0_rgb']`
 
-## 终端 C：动作桥（/policy_action -> /joint_command）
+## 终端 C：动作桥（/policy_action -> /joint_command，抗抖动/抗漂移）
 
 ```bash
 conda deactivate 2>/dev/null || true
@@ -81,8 +87,12 @@ cd /root/gpufree-data/lerobot
   --state-topic /joint_states \
   --action-topic /policy_action \
   --cmd-topic /joint_command \
-  --mode absolute \
-  --action-scale 1.0
+  --mode delta \
+  --action-scale 0.015 \
+  --clamp-abs 1.6 \
+  --smoothing-alpha 0.15 \
+  --max-delta 0.008 \
+  --deadband 0.02
 ```
 
 ## 4. 验证标准（是否真在 PI0 推理）
@@ -111,6 +121,17 @@ ros2 topic echo /joint_command --once
   - `/sim/camera/image_raw_left`
   - `/sim/camera/image_raw_right`
 
+若出现 `skip request: missing_multi_image` 频繁：
+
+- 优先检查相机源是否稳定：
+  - `ros2 topic hz /sim/camera/image_raw`
+  - `ros2 topic hz /sim/camera/image_raw_left`
+  - `ros2 topic hz /sim/camera/image_raw_right`
+- 已支持短时缺图保护：
+  - `--reuse-missing-image-ms 200`：短时间复用最近一次完整三路图像包
+  - `--safe-zero-on-missing-images --safe-zero-after-ms 500`：缺图持续时发布零动作，避免“找不到目标后跑飞”
+- 若模型要求严格三路，不建议关闭 `--require-all-multi-images`。
+
 ## 5. 摄像头排布建议（避免“手臂乱窜”）
 
 - `base_0_rgb`：固定在底座前上方，能同时看见夹爪工作区和目标物。
@@ -131,8 +152,25 @@ ros2 topic echo /joint_command --once
   - 用 `./isaaclab.sh -p ...` 运行环境脚本。
 - GPU OOM：
   - 降低并行/频率，关闭其他占显存进程。
+- 机械臂“跑着跑着单向漂移”：
+  - 将动作桥保持 `delta` 模式，并使用较小 `action_scale` + `max_delta` + `deadband`。
+  - 这通常是积分漂移，不是链路断开。
 
-## 7. 本地已清理的无用文件
+## 7. 本次新增参数（2026-03-11）
+
+- `isaaclab_side/ros2_obs_action_bridge.py`
+  - `--image-stale-ms`
+  - `--multi-image-sync-ms`
+  - `--require-all-multi-images`
+  - `--reuse-missing-image-ms`
+  - `--safe-zero-on-missing-images`
+  - `--safe-zero-after-ms`
+- `isaaclab_side/ros2_action_to_joint_command.py`
+  - `--smoothing-alpha`
+  - `--max-delta`
+  - `--deadband`
+
+## 8. 本地已清理的无用文件
 
 本次已删除：
 
@@ -141,4 +179,3 @@ ros2 topic echo /joint_command --once
 - `lerobot_side/__pycache__/`
 - `shared/__pycache__/`
 - `src/lerobot/__pycache__/`
-

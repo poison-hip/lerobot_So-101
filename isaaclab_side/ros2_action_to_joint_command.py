@@ -19,14 +19,21 @@ class ActionToJointCommandBridge(Node):
         mode: str,
         action_scale: float,
         clamp_abs: float,
+        smoothing_alpha: float,
+        max_delta: float,
+        deadband: float,
     ) -> None:
         super().__init__("action_to_joint_command_bridge")
         self.mode = mode
         self.action_scale = action_scale
         self.clamp_abs = clamp_abs
+        self.smoothing_alpha = max(0.0, min(1.0, smoothing_alpha))
+        self.max_delta = max(0.0, max_delta)
+        self.deadband = max(0.0, deadband)
 
         self.last_state: Optional[JointState] = None
         self.last_action: Optional[list[float]] = None
+        self.prev_target_pos: Optional[list[float]] = None
         self.publish_count = 0
 
         self.state_sub = self.create_subscription(JointState, state_topic, self._on_state, 10)
@@ -35,7 +42,8 @@ class ActionToJointCommandBridge(Node):
 
         self.get_logger().info(
             f"started. state_topic={state_topic}, action_topic={action_topic}, cmd_topic={cmd_topic}, "
-            f"mode={mode}, action_scale={action_scale}, clamp_abs={clamp_abs}"
+            f"mode={mode}, action_scale={action_scale}, clamp_abs={clamp_abs}, "
+            f"smoothing_alpha={self.smoothing_alpha}, max_delta={self.max_delta}, deadband={self.deadband}"
         )
 
     def _on_state(self, msg: JointState) -> None:
@@ -59,14 +67,39 @@ class ActionToJointCommandBridge(Node):
         else:
             action = action[:num_joints]
 
+        if self.deadband > 0:
+            action = [0.0 if abs(v) < self.deadband else v for v in action]
+
         if self.mode == "delta":
             target_pos = [state.position[i] + self.action_scale * action[i] for i in range(num_joints)]
         else:
             target_pos = [self.action_scale * action[i] for i in range(num_joints)]
 
+        if self.prev_target_pos is not None:
+            if self.smoothing_alpha > 0:
+                a = self.smoothing_alpha
+                target_pos = [
+                    a * target_pos[i] + (1.0 - a) * self.prev_target_pos[i] for i in range(num_joints)
+                ]
+
+            if self.max_delta > 0:
+                limited: list[float] = []
+                for i in range(num_joints):
+                    prev = self.prev_target_pos[i]
+                    raw = target_pos[i]
+                    delta = raw - prev
+                    if delta > self.max_delta:
+                        delta = self.max_delta
+                    elif delta < -self.max_delta:
+                        delta = -self.max_delta
+                    limited.append(prev + delta)
+                target_pos = limited
+
         if self.clamp_abs > 0:
             limit = abs(self.clamp_abs)
             target_pos = [max(-limit, min(limit, v)) for v in target_pos]
+
+        self.prev_target_pos = [float(v) for v in target_pos]
 
         out = JointState()
         out.header.stamp = self.get_clock().now().to_msg()
@@ -92,6 +125,24 @@ def main() -> None:
     parser.add_argument("--mode", choices=["absolute", "delta"], default="absolute")
     parser.add_argument("--action-scale", type=float, default=1.0)
     parser.add_argument("--clamp-abs", type=float, default=3.14159)
+    parser.add_argument(
+        "--smoothing-alpha",
+        type=float,
+        default=0.0,
+        help="EMA smoothing factor in [0,1]. 0 disables smoothing.",
+    )
+    parser.add_argument(
+        "--max-delta",
+        type=float,
+        default=0.0,
+        help="Max per-step joint target delta (rad). 0 disables rate limiting.",
+    )
+    parser.add_argument(
+        "--deadband",
+        type=float,
+        default=0.0,
+        help="Action deadband in action units before scaling. 0 disables deadband.",
+    )
     args = parser.parse_args()
 
     rclpy.init()
@@ -102,6 +153,9 @@ def main() -> None:
         mode=args.mode,
         action_scale=args.action_scale,
         clamp_abs=args.clamp_abs,
+        smoothing_alpha=args.smoothing_alpha,
+        max_delta=args.max_delta,
+        deadband=args.deadband,
     )
     try:
         rclpy.spin(node)
@@ -118,4 +172,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
