@@ -1,5 +1,43 @@
 # LeRobot x Isaac Sim/Isaac Lab 交接文档（可直接运行）
 
+## 更新记录（2026-03-11）
+
+### 新增：观测桥稳定性保护（`isaaclab_side/ros2_obs_action_bridge.py`）
+
+- 新增参数：
+  - `--image-stale-ms`
+  - `--multi-image-sync-ms`
+  - `--require-all-multi-images`
+  - `--reuse-missing-image-ms`
+  - `--safe-zero-on-missing-images`
+  - `--safe-zero-after-ms`
+- 行为更新：
+  - 支持严格三路图像门控（模型要求三路时可启用）。
+  - 支持短时缺图复用最近完整三路图像包，降低偶发掉帧导致的请求中断。
+  - 支持缺图持续时发布零动作，降低“找不到目标后持续漂移/跑飞”风险。
+
+### 新增：动作桥平滑与限幅（`isaaclab_side/ros2_action_to_joint_command.py`）
+
+- 新增参数：
+  - `--smoothing-alpha`
+  - `--max-delta`
+  - `--deadband`
+- 行为更新：
+  - 支持 EMA 平滑、每步关节变化限幅、动作死区抑抖。
+  - 推荐配合 `--mode delta` 使用，降低积分漂移与抖动。
+
+### 目录整理：低频脚本集中到 `isaaclab_side/tools/`
+
+- 已集中脚本：
+  - `client.py`
+  - `policy_probe.py`
+  - `ros2_image_client.py`
+  - `ros2_joint_client.py`
+  - `run_env_loop.py`
+- 主链路保留在 `isaaclab_side/`：
+  - `ros2_obs_action_bridge.py`
+  - `ros2_action_to_joint_command.py`
+
 ## 1. 目标与当前状态
 
 目标：保持两个独立环境，不跨 conda import，仅通过本地 HTTP 通信。
@@ -144,18 +182,6 @@ ros2 topic echo /joint_command --once
 - 目标物必须在两个腕部视角中长期可见；动起来也不能丢。
 - 三路相机方向不应完全重合，避免信息冗余。
 
-## 6. 常见问题
-
-- ROS + conda + Isaac 混用导致 `rclpy`/`numpy`/`GLIBCXX` 冲突：
-  - ROS bridge 固定用系统 Python（`/usr/bin/python3`）。
-- Isaac 端直接 `gym.make("Isaac-...")` 报未注册：
-  - 用 `./isaaclab.sh -p ...` 运行环境脚本。
-- GPU OOM：
-  - 降低并行/频率，关闭其他占显存进程。
-- 机械臂“跑着跑着单向漂移”：
-  - 将动作桥保持 `delta` 模式，并使用较小 `action_scale` + `max_delta` + `deadband`。
-  - 这通常是积分漂移，不是链路断开。
-
 ## 7. 本次新增参数（2026-03-11）
 
 - `isaaclab_side/ros2_obs_action_bridge.py`
@@ -169,13 +195,3 @@ ros2 topic echo /joint_command --once
   - `--smoothing-alpha`
   - `--max-delta`
   - `--deadband`
-
-## 8. 本地已清理的无用文件
-
-本次已删除：
-
-- `lerobot_isaaclab_bridge_bundle.tar.gz`
-- `isaaclab_side/__pycache__/`
-- `lerobot_side/__pycache__/`
-- `shared/__pycache__/`
-- `src/lerobot/__pycache__/`
